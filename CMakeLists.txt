@@ -20,7 +20,7 @@ cmake_minimum_required(VERSION 3.12)
 if (DEFINED ENV{FREERTOS_PATH})
   SET(FREERTOS_PATH $ENV{FREERTOS_PATH})
 else()
-  SET(FREERTOS_PATH ${CMAKE_CURRENT_LIST_DIR}/FreeRTOS-Kernel)
+  SET(FREERTOS_PATH ${CMAKE_CURRENT_LIST_DIR}/FreeRTOS)
 endif()
 
 message("FreeRTOS Kernel located in ${FREERTOS_PATH}")
@@ -37,17 +37,25 @@ pico_sdk_init()
 
 add_executable(embarcatech-tarefa-freertos-2
     main.c
+    bibliotecas/button.c
+    bibliotecas/led.c
+    bibliotecas/buzzer.c
+    bibliotecas/display.c
+    inc/ssd1306_i2c.c
 )
 
 target_include_directories(embarcatech-tarefa-freertos-2 PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/include
+    ${CMAKE_CURRENT_LIST_DIR}/bibliotecas
 )
 
 target_link_libraries(embarcatech-tarefa-freertos-2 
     pico_stdlib 
     FreeRTOS-Kernel-Heap4 
+    hardware_pwm 
     hardware_i2c
+    hardware_adc
     )
 
 pico_add_extra_outputs(embarcatech-tarefa-freertos-2)
