@@ -8,7 +8,7 @@
 #define BUZZER_A 21                       // Pino do primeiro buzzer
 #define BUZZER_B 10                       // Pino do segundo buzzer
 
-#define BUZZER_FREQ 2000 // Hz
+#define BUZZER_FREQ 8000 // Hz
 
 /**
  * Inicializa o PWM para um buzzer em um pino específico.

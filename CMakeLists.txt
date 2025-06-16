@@ -56,6 +56,7 @@ target_link_libraries(embarcatech-tarefa-freertos-2
     hardware_pwm 
     hardware_i2c
     hardware_adc
+    hardware_pwm
     )
 
 pico_add_extra_outputs(embarcatech-tarefa-freertos-2)
