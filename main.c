@@ -1,30 +1,45 @@
+/*
+ * Autor: Eric Senne Roma e Thiago Azevedo
+ * Data de Criação: 24/06/2025
+ * Descrição: Código principal do projeto de monitoramento de temperatura usando FreeRTOS no Raspberry Pi Pico.
+ *            O sistema lê a temperatura interna do microcontrolador, exibe no display OLED, indica o status com LED RGB,
+ *            aciona um buzzer em caso de temperatura alta e permite silenciar o alarme via botão.
+ *            Utiliza multitarefa com FreeRTOS, filas para comunicação entre tarefas e semáforo para controle do alarme.
+ */
+
+// Inclusão das bibliotecas do FreeRTOS, periféricos do Pico e módulos do projeto
 #include "FreeRTOS.h"
 #include "task.h"
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "queue.h"
 #include "semphr.h"
-#include "hardware/adc.h"
-#include "hardware/pwm.h"
-#include "include/display.h"
-#include "inc/ssd1306.h"
-#include "include/led.h"
-#include "include/buzzer.h"
-#include "include/button.h"
+#include "hardware/adc.h"      // ADC para leitura da temperatura
+#include "hardware/pwm.h"      // PWM para controle do buzzer
+#include "include/display.h"   // Funções do display OLED
+#include "inc/ssd1306.h"       // Driver do display SSD1306
+#include "include/led.h"       // Controle do LED RGB
+#include "include/buzzer.h"    // Controle do buzzer
+#include "include/button.h"    // Controle do botão
 
-#define ADC_TEMPERATURE_CHANNEL 4
-#define N_SAMPLES 20
-//#define TEMP_ALTA
+#define ADC_TEMPERATURE_CHANNEL 4   // Canal do ADC para sensor de temperatura interna
+#define N_SAMPLES 20                // Número de amostras para média móvel
+// #define TEMP_ALTA                // Descomente para simular temperatura alta
+// #define TEMP_MEDIA               // Descomente para simular temperatura média
 
-extern volatile bool button_a_pressed;
+extern volatile bool button_a_pressed; // Flag global do botão A (externa, definida em outro arquivo)
 
-QueueHandle_t xFilaTemperatura;
-SemaphoreHandle_t xAlarmeSemaforo;
+QueueHandle_t xFilaTemperatura;        // Fila para enviar temperatura para o display
+SemaphoreHandle_t xAlarmeSemaforo;     // Semáforo para controle do alarme/buzzer
 
-uint8_t display_buffer[DISPLAY_WIDTH * DISPLAY_HEIGHT / 8];
+uint8_t display_buffer[DISPLAY_WIDTH * DISPLAY_HEIGHT / 8]; // Buffer do display OLED
 
-volatile float temperatura_global = 0.0f; // Variável global para temperatura
+volatile float temperatura_global = 0.0f; // Variável global para temperatura média
 
+/**
+ * Converte valor lido do ADC para temperatura em graus Celsius.
+ * Fórmula baseada no datasheet do RP2040.
+ */
 float adc_to_temperature(uint16_t adc_value)
 {
     const float conversion_factor = 3.3f / (1 << 12);
@@ -33,6 +48,9 @@ float adc_to_temperature(uint16_t adc_value)
     return temperature;
 }
 
+/**
+ * Tarefa responsável por ler a temperatura do sensor interno, calcular a média e enviar para a fila.
+ */
 void task_read_temp(void *params)
 {
     float temperaturas[N_SAMPLES] = {0};
@@ -45,14 +63,14 @@ void task_read_temp(void *params)
             uint16_t adc_value = adc_read();
             float temperatura = adc_to_temperature(adc_value);
 #ifdef TEMP_ALTA
-            temperatura += 15.0f;
+            temperatura += 15.0f; // Simula temperatura alta
 #endif
 #ifdef TEMP_MEDIA
-            temperatura += 5.0f;
+            temperatura += 5.0f;  // Simula temperatura média
 #endif
             temperaturas[i] = temperatura;
             soma += temperatura;
-            vTaskDelay(pdMS_TO_TICKS(10));
+            vTaskDelay(pdMS_TO_TICKS(10)); // Aguarda 10 ms entre amostras
         }
         float media = soma / N_SAMPLES;
 
@@ -60,12 +78,15 @@ void task_read_temp(void *params)
 
         temperatura_global = media; // Atualiza variável global
 
-        xQueueSend(xFilaTemperatura, &media, portMAX_DELAY); // Só para o display
+        xQueueSend(xFilaTemperatura, &media, portMAX_DELAY); // Envia para o display
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Aguarda 1 segundo para próxima média
     }
 }
 
+/**
+ * Tarefa responsável por receber a temperatura da fila e exibir no display OLED.
+ */
 void task_display_oled(void *params)
 {
     float temperatura;
@@ -74,11 +95,15 @@ void task_display_oled(void *params)
         if (xQueueReceive(xFilaTemperatura, &temperatura, portMAX_DELAY))
         {
             display_temp(display_buffer, temperatura);
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(1000)); // Atualiza display a cada 1 segundo
         }
     }
 }
 
+/**
+ * Tarefa responsável por indicar o status da temperatura usando o LED RGB.
+ * Verde: temperatura baixa, Amarelo: média, Vermelho: alta.
+ */
 void task_led_status(void *params)
 {
     while (1)
@@ -87,13 +112,16 @@ void task_led_status(void *params)
         if (temperatura < 25.0f)
             set_led_color(false, true, false); // Verde
         else if (temperatura < 35.0f)
-            set_led_color(true, true, false); // Amarelo
+            set_led_color(true, true, false);  // Amarelo
         else
             set_led_color(true, false, false); // Vermelho
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(500)); // Atualiza LED a cada 0,5 segundo
     }
 }
 
+/**
+ * Tarefa responsável por detectar o pressionamento do botão e liberar o semáforo do alarme.
+ */
 void task_botao(void *params)
 {
     while (1)
@@ -101,13 +129,17 @@ void task_botao(void *params)
         if (button_a_pressed)
         {
             button_a_pressed = false; // Limpa o flag
-            xSemaphoreGive(xAlarmeSemaforo); 
-            vTaskDelay(pdMS_TO_TICKS(300)); 
+            xSemaphoreGive(xAlarmeSemaforo); // Libera o semáforo para silenciar o buzzer
+            vTaskDelay(pdMS_TO_TICKS(300));  // Debounce do botão
         }
-        vTaskDelay(pdMS_TO_TICKS(50)); 
+        vTaskDelay(pdMS_TO_TICKS(50)); // Polling do botão
     }
 }
 
+/**
+ * Tarefa responsável por acionar o buzzer quando a temperatura está alta.
+ * O buzzer só para quando o botão for pressionado.
+ */
 void task_buzzer_alert(void *params)
 {
     pwm_init_buzzer(BUZZER_A, BUZZER_FREQ);
@@ -130,13 +162,16 @@ void task_buzzer_alert(void *params)
             alarme_ativo = false;
             pwm_set_gpio_level(BUZZER_A, 0); // Garante que está desligado
         }
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(200)); // Aguarda 200 ms
     }
 }
 
+/**
+ * Função principal: inicializa periféricos, cria tarefas e inicia o scheduler do FreeRTOS.
+ */
 int main()
 {
-    stdio_init_all();
+    stdio_init_all(); // Inicializa UART/USB para debug
 
     adc_init();
     adc_set_temp_sensor_enabled(true);
@@ -149,17 +184,18 @@ int main()
 
     setup_led_rgb();
 
-    xAlarmeSemaforo = xSemaphoreCreateBinary();
+    xAlarmeSemaforo = xSemaphoreCreateBinary(); // Cria semáforo binário
 
-    xFilaTemperatura = xQueueCreate(20, sizeof(float));
+    xFilaTemperatura = xQueueCreate(20, sizeof(float)); // Cria fila para temperaturas
 
+    // Criação das tarefas do FreeRTOS
     xTaskCreate(task_read_temp, "Armazenar Temperatura", 256, NULL, 1, NULL);
     xTaskCreate(task_display_oled, "Display OLED", 256, NULL, 1, NULL);
     xTaskCreate(task_led_status, "LED Status", 256, NULL, 1, NULL);
     xTaskCreate(task_buzzer_alert, "Buzzer Alerta", 256, NULL, 3, NULL);
     xTaskCreate(task_botao, "Botao", 256, NULL, 4, NULL);
 
-    vTaskStartScheduler();
+    vTaskStartScheduler(); // Inicia o escalonador do FreeRTOS
 
-    while (1);
+    while (1); // Loop infinito caso o scheduler retorne (não deve acontecer)
 }
